@@ -108,3 +108,96 @@
     sections.forEach(section => observer.observe(section));
   }
 })();
+
+// Review controls are local to this lesson. No account or network is involved.
+(() => {
+  const quizzes = [...document.querySelectorAll('.quiz')];
+  if (!quizzes.length || document.querySelector('.review-toolbar')) return;
+  const storageKey = 'acp620.quiz-bookmarks.v1';
+  const page = location.pathname.split('/').pop() || 'index.html';
+  let saved = {};
+  let persistent = true;
+  try {
+    const data = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    if (data && typeof data === 'object' && !Array.isArray(data)) saved = data;
+  } catch (_) { persistent = false; }
+  let onlySaved = false;
+  const toolbar = document.createElement('div');
+  toolbar.className = 'review-toolbar';
+  toolbar.setAttribute('role', 'group');
+  toolbar.setAttribute('aria-label', '本課練習複習工具');
+  const title = document.createElement('strong');
+  title.textContent = '本課複習';
+  toolbar.append(title);
+  const status = document.createElement('p');
+  status.className = 'review-status';
+  status.setAttribute('role', 'status');
+  const empty = document.createElement('p');
+  empty.className = 'review-empty note';
+  empty.textContent = '本課尚無書籤。選「顯示全部題目」，再按題目旁的「加入書籤」。';
+  empty.hidden = true;
+  const host = quizzes[0].closest('section') || quizzes[0].parentElement;
+  host.insertBefore(toolbar, host.firstElementChild?.nextSibling || null);
+  toolbar.after(status, empty);
+  function button(text, fn) {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'secondary';
+    el.textContent = text;
+    el.addEventListener('click', fn);
+    toolbar.append(el);
+    return el;
+  }
+  const filter = button('只看書籤', () => { onlySaved = !onlySaved; refresh(); });
+  filter.setAttribute('aria-pressed', 'false');
+  button('展開全部解析', () => quizzes.filter(q => !q.hidden).forEach(q => q.querySelectorAll('details').forEach(d => { d.open = true; })));
+  button('收合全部解析', () => quizzes.forEach(q => q.querySelectorAll('details').forEach(d => { d.open = false; })));
+  function persist() {
+    try { localStorage.setItem(storageKey, JSON.stringify(saved)); }
+    catch (_) { persistent = false; }
+  }
+  function refresh() {
+    let count = 0;
+    quizzes.forEach(q => {
+      const marked = saved[q.dataset.bookmarkKey] === true;
+      if (marked) count++;
+      q.hidden = onlySaved && !marked;
+      q.classList.toggle('quiz-saved', marked);
+      const control = q.querySelector('.quiz-bookmark');
+      control.setAttribute('aria-pressed', String(marked));
+      control.textContent = marked ? '★ 已加入書籤' : '☆ 加入書籤';
+    });
+    filter.textContent = onlySaved ? '顯示全部題目' : '只看書籤';
+    filter.setAttribute('aria-pressed', String(onlySaved));
+    empty.hidden = !(onlySaved && count === 0);
+    status.textContent = `本課 ${quizzes.length} 題，已加入 ${count} 題書籤。` + (persistent ? '書籤保存在此瀏覽器，不跨裝置同步。' : '瀏覽器無法儲存，目前書籤僅保留於本次頁面。');
+  }
+  quizzes.forEach((q, i) => {
+    if (!q.id) q.id = `quiz-${i + 1}`;
+    q.dataset.bookmarkKey = `${page}#${q.id}`;
+    const mark = document.createElement('button');
+    mark.type = 'button';
+    mark.className = 'secondary quiz-bookmark';
+    mark.setAttribute('aria-label', `第 ${i + 1} 題書籤`);
+    mark.addEventListener('click', () => {
+      const key = q.dataset.bookmarkKey;
+      if (saved[key] === true) delete saved[key]; else saved[key] = true;
+      persist();
+      refresh();
+      // Keep keyboard focus usable when a removed bookmark disappears.
+      if (q.hidden) filter.focus();
+    });
+    q.prepend(mark);
+    q.querySelectorAll('details.english-version').forEach(d => d.setAttribute('lang', 'en'));
+  });
+  // Respect bookmark changes in another tab on the same site.
+  window.addEventListener('storage', event => {
+    if (event.key !== storageKey) return;
+    try {
+      const data = JSON.parse(event.newValue || '{}');
+      saved = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+      refresh();
+    } catch (_) { /* Ignore malformed external storage values. */ }
+  });
+  refresh();
+})();
